@@ -1,0 +1,45 @@
+### MITM LAUNCH
+
+mitmdump \
+  --mode reverse:https://127.0.0.1:5001 \
+  --listen-port 5000 \
+  --certs "*=combined.pem" --set termlog_verbosity=warning --ssl-insecure -s angel_pit_http.py -s mitmpcap.py
+
+### GENERATE CERTIFICATES
+
+# CA private key
+openssl genrsa -out ca-key.pem 4096
+
+# Self-signed CA certificate
+openssl req -x509 -new -nodes -key ca-key.pem -sha256 -days 3650 -out ca-cert.pem \
+  -subj "/C=US/ST=Local/L=DevCity/O=MyOrg/CN=MyRootCA"
+
+# Server private key
+openssl genrsa -out server-key.pem 2048
+
+# Config file for subjectAltName (SAN)
+cat > san.cnf <<EOF
+[req]
+distinguished_name=req
+req_extensions=req_ext
+prompt=no
+
+[req_ext]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+IP.1 = 127.0.0.1
+EOF
+
+# CSR using SAN config
+openssl req -new -key server-key.pem -out server.csr -config san.cnf \
+  -subj "/C=US/ST=Local/L=DevCity/O=MyOrg/CN=localhost"
+
+openssl x509 -req \
+  -in server.csr \
+  -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
+  -out server-cert.pem -days 365 -sha256 \
+  -extensions req_ext -extfile san.cnf
+
+cat server-cert.pem server-key.pem > combined.pem

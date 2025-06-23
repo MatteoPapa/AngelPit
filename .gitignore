@@ -1,7 +1,6 @@
-ca-cert.pem
-ca-key.pem
-server-cert.pem
-server-key.pem
-san.cnf
-server.csr
+# SSL files
+*.pem
+*.csr
+*.cnf
 __pycache__/
+
