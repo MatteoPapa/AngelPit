@@ -2,7 +2,7 @@ import requests
 import sys
 
 # Path to your trusted CA certificate
-CA_CERT = "./ca-cert.pem"
+CA_CERT = "../ca-cert.pem"
 
 # Create a persistent session
 session = requests.Session()

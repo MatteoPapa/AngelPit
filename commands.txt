@@ -3,8 +3,7 @@
 mitmdump \
   --mode reverse:https://127.0.0.1:5001 \
   --listen-port 5000 \
-  --certs "*=combined.pem" --set termlog_verbosity=warning --ssl-insecure -s angel_pit_proxy.py
-
+  --certs "*=combined.pem" --set termlog_verbosity=warning --ssl-insecure -s angel_pit_proxy.py -s angel_dumper.py
 ### GENERATE CERTIFICATES
 
 # CA private key
