@@ -3,7 +3,7 @@
 mitmdump \
   --mode reverse:https://127.0.0.1:5001 \
   --listen-port 5000 \
-  --certs "*=combined.pem" --set termlog_verbosity=warning --ssl-insecure -s angel_pit_http.py -s mitmpcap.py
+  --certs "*=combined.pem" --set termlog_verbosity=warning --ssl-insecure -s angel_pit_proxy.py
 
 ### GENERATE CERTIFICATES
 
@@ -43,3 +43,8 @@ openssl x509 -req \
   -extensions req_ext -extfile san.cnf
 
 cat server-cert.pem server-key.pem > combined.pem
+
+#LOAD BALANCING 
+mitmdump --mode reverse:https://127.0.0.1:5001 --ssl-insecure --listen-port 8081
+mitmdump --mode reverse:https://127.0.0.1:5001 --ssl-insecure --listen-port 8082
+mitmdump --mode reverse:https://127.0.0.1:5001 --ssl-insecure --listen-port 8083

@@ -1,76 +1,76 @@
 import asyncio
 import aiohttp
 import ssl
-import random
-import string
-from aiohttp import TCPConnector, ClientTimeout
-from asyncio import TimeoutError
-from collections import Counter
-import sys
 import time
+from collections import Counter
+import sys 
 
-# ======== CONFIGURATION ========
-CA_CERT_PATH = "./ca-cert.pem"
-PORT = sys.argv[1] if len(sys.argv) > 1 else "5000"
-URL = f"https://127.0.0.1:{PORT}"
+PORT = sys.argv[1] if len(sys.argv) > 1 else 5000
+TARGET_URL = f"http://127.0.0.1:{PORT}"
+TOTAL_REQUESTS = 5000
+DURATION_SECONDS = 60
+REQUESTS_PER_SECOND = TOTAL_REQUESTS // DURATION_SECONDS
+CACERT_PATH = "ca-cert.pem"
+TIMEOUT_SECONDS = 15
 
-NUM_REQUESTS = 20000           # Total number of requests to send
-CONCURRENCY_LIMIT = 1000       # Max number of concurrent connections
-BATCH_SIZE = 1000              # Requests per wave
-DELAY_BETWEEN_BATCHES = 1      # Seconds to pause between batches
-REQUEST_TIMEOUT = 10           # Per-request timeout in seconds
+# Track results globally
+results_queue = asyncio.Queue()
 
-# ======== SSL SETUP ========
-ssl_ctx = ssl.create_default_context(cafile=CA_CERT_PATH)
-ssl_ctx.check_hostname = False
-
-# ======== STATS TRACKING ========
-failures = Counter()
-start_time = time.time()
-
-# ======== PAYLOAD GENERATION ========
-def random_payload():
-    text = ''.join(random.choices(string.ascii_lowercase, k=8))
-    return {"fruit": text if random.random() > 0.2 else "banana"}
-
-# ======== REQUEST FUNCTION ========
-async def send_request(session, i):
+async def fetch(session, url):
     try:
-        data = random_payload()
-        async with session.post(URL, json=data) as resp:
-            text = await resp.text()
-            print(f"[{i:05}] {resp.status} - {data['fruit']}: {text[:60]}")
-    except TimeoutError:
-        failures["timeout"] += 1
-        print(f"[{i:05}] Timeout")
+        timeout = aiohttp.ClientTimeout(total=TIMEOUT_SECONDS)
+        async with session.get(url, timeout=timeout) as response:
+            await results_queue.put(('success', response.status))
     except Exception as e:
-        failures["other"] += 1
-        print(f"[{i:05}] Failed: {e}")
+        await results_queue.put(('error', str(e)))
 
-# ======== MAIN LOGIC ========
+async def send_requests_batch(session, interval, second_index):
+    local_success = 0
+    local_errors = Counter()
+
+    tasks = []
+    for _ in range(REQUESTS_PER_SECOND):
+        task = asyncio.create_task(fetch(session, TARGET_URL))
+        tasks.append(task)
+        await asyncio.sleep(interval)
+
+    await asyncio.gather(*tasks)
+
+    # Drain new results from the queue
+    for _ in range(REQUESTS_PER_SECOND):
+        result_type, detail = await results_queue.get()
+        if result_type == 'success':
+            local_success += 1
+        else:
+            local_errors[detail] += 1
+
+    # Log for this second
+    print(f"[{second_index+1:02d}s] ✅ Success: {local_success}, ❌ Errors: {sum(local_errors.values())}")
+    for error_msg, count in local_errors.items():
+        print(f"        - {count} × {error_msg}")
+
 async def main():
-    timeout = ClientTimeout(total=REQUEST_TIMEOUT)
-    connector = TCPConnector(ssl=ssl_ctx, limit=CONCURRENCY_LIMIT)
-    headers = {
-        "User-Agent": "CHECKER",
-        "Content-Type": "application/json"
-    }
+    ssl_context = ssl.create_default_context(cafile=CACERT_PATH)
+    # connector = aiohttp.TCPConnector(ssl=ssl_context)
+    connector = aiohttp.TCPConnector()
 
-    async with aiohttp.ClientSession(connector=connector, headers=headers, timeout=timeout) as session:
-        for i in range(0, NUM_REQUESTS, BATCH_SIZE):
-            batch = [send_request(session, i + j) for j in range(min(BATCH_SIZE, NUM_REQUESTS - i))]
-            await asyncio.gather(*batch)
-            await asyncio.sleep(DELAY_BETWEEN_BATCHES)
+    total_success = 0
+    total_errors = 0
 
-    elapsed = time.time() - start_time
-    print("\n✅ Load test completed.")
-    print(f"📈 Total requests: {NUM_REQUESTS}")
-    print(f"✅ Successes: {NUM_REQUESTS - failures['timeout'] - failures['other']}")
-    print(f"❌ Timeouts: {failures['timeout']}")
-    print(f"⚠️  Other failures: {failures['other']}")
-    print(f"⏱ Duration: {elapsed:.2f} seconds")
-    print(f"🚀 Requests/sec: {NUM_REQUESTS / elapsed:.2f}")
+    async with aiohttp.ClientSession(connector=connector) as session:
+        for second in range(DURATION_SECONDS):
+            start = time.time()
+            interval = 1 / REQUESTS_PER_SECOND
+            # Fire and await each batch now (for cleaner per-second logging)
+            await send_requests_batch(session, interval, second)
+            elapsed = time.time() - start
+            if elapsed < 1:
+                await asyncio.sleep(1 - elapsed)
 
-# ======== ENTRY POINT ========
+    print(f"\n📊 Benchmark Complete:")
+    print(f"    Total Sent:   {TOTAL_REQUESTS}")
+    print(f"    Total Success:✅ {total_success}")
+    print(f"    Total Errors: ❌ {TOTAL_REQUESTS - total_success}")
+
 if __name__ == "__main__":
     asyncio.run(main())

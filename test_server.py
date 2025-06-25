@@ -1,6 +1,7 @@
 import http.server
 import ssl
-import uuid  # for generating unique session IDs
+import uuid
+from socketserver import ThreadingMixIn
 
 PORT = 5001
 CERT_FILE = "server-cert.pem"
@@ -8,7 +9,6 @@ KEY_FILE = "server-key.pem"
 
 class MyHandler(http.server.BaseHTTPRequestHandler):
     def _send_response(self):
-        # Check if client already has a session cookie
         cookie_header = self.headers.get("Cookie", "")
         has_session = "session=" in cookie_header
 
@@ -21,7 +21,6 @@ class MyHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", f"session={session_id}; HttpOnly; Path=/")
 
         self.end_headers()
-
         html = b"<html><body><h1>GRAZIEDARIOGRAZIEDARIOGRAZIEDP1=</h1></body></html>"
         self.wfile.write(html)
 
@@ -34,11 +33,14 @@ class MyHandler(http.server.BaseHTTPRequestHandler):
         print(f"📨 Received POST data: {post_data.decode(errors='ignore')}")
         self._send_response()
 
-httpd = http.server.HTTPServer(('0.0.0.0', PORT), MyHandler)
+class ThreadedHTTPServer(ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True  # allows clean exit on Ctrl+C
+
+httpd = ThreadedHTTPServer(('0.0.0.0', PORT), MyHandler)
 
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain(certfile=CERT_FILE, keyfile=KEY_FILE)
 httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-print(f"🚀 Serving HTTPS on https://localhost:{PORT}")
+print(f"🚀 Serving threaded HTTPS on https://localhost:{PORT}")
 httpd.serve_forever()
