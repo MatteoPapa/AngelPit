@@ -3,7 +3,8 @@
 mitmdump \
   --mode reverse:https://127.0.0.1:5001 \
   --listen-port 5000 \
-  --certs "*=combined.pem" --set termlog_verbosity=warning --ssl-insecure -s angel_pit_proxy.py -s angel_dumper.py
+  --certs "*=combined.pem" --quiet --ssl-insecure -s angel_pit_proxy.py -s angel_dumper.py --set pcap_output='./pcaps'
+  
 ### GENERATE CERTIFICATES
 
 # CA private key
@@ -20,7 +21,7 @@ openssl genrsa -out server-key.pem 2048
 cat > san.cnf <<EOF
 [req]
 distinguished_name=req
-req_extensions=req_ext
+req_extensions=req_ext+
 prompt=no
 
 [req_ext]

@@ -21,7 +21,7 @@ class MyHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", f"session={session_id}; HttpOnly; Path=/")
 
         self.end_headers()
-        html = b"<html><body><h1>GRAZIEDARIOGRAZIEDARIOGRAZIEDP1=</h1></body></html>"
+        html = b"<html><body><h1>ABCDEFGHILMNOPQRSTUVWXYZ0123456=</h1></body></html>"
         self.wfile.write(html)
 
     def do_GET(self):
