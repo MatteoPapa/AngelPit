@@ -4,3 +4,6 @@
 *.cnf
 __pycache__/
 pcaps
+mitmkeys.log
+*.pcap
+*_pcaps/

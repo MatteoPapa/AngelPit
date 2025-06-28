@@ -1,228 +1,180 @@
-import os
-import shlex
-from time import time
-from math import modf
-from struct import pack
-from subprocess import Popen, PIPE
-from mitmproxy import ctx
-import socket  # at the top
-import ipaddress
-import errno
+# unified_pcap_addon.py
 
-ROTATE_FLOW_COUNT = 200
-DEFAULT_PCAP_FOLDER = 'pcaps'
+from mitmproxy import ctx, http, tcp
+from scapy.all import Ether, IP, TCP, Raw, PcapWriter, PcapNgWriter
+import threading, datetime, time, shutil, os, logging
 
-class Exporter:
-    def __init__(self):
-        self.sessions = {}
+# # --- TCP/PCAP Dumper Thread ---
+class Dumper(threading.Thread):
+    def __init__(self, file_format, logger, dump_mode='pcap'):
+        super().__init__(daemon=True)
+        self.file_format = file_format
+        self.logger = logger
+        self.dump_mode = dump_mode
+        self.lock = threading.Lock()
+        self.lock.acquire()
 
-    def write(self, data):
-        raise NotImplementedError()
-
-    def flush(self):
-        raise NotImplementedError()
-
-    def close(self):
-        raise NotImplementedError()
-
-    def header(self):
-        data = pack('<IHHiIII', 0xa1b2c3d4, 2, 4, 0, 0, 0x040000, 1)
-        self.write(data)
-
-    def packet(self, src_host, src_port, dst_host, dst_port, payload):
-        # Resolve hostnames to IPv4
-        try:
-            src_ip = str(ipaddress.IPv4Address(src_host))
-        except ipaddress.AddressValueError:
-            try:
-                src_ip = socket.gethostbyname(src_host)
-            except Exception:
-                print(f"[⚠️] Cannot resolve source host: {src_host}")
-                return
-
-        try:
-            dst_ip = str(ipaddress.IPv4Address(dst_host))
-        except ipaddress.AddressValueError:
-            try:
-                dst_ip = socket.gethostbyname(dst_host)
-            except Exception:
-                print(f"[⚠️] Cannot resolve dest host: {dst_host}")
-                return
-
-        key = f"{src_ip}:{src_port}-{dst_ip}:{dst_port}"
-        session = self.sessions.get(key)
-        if session is None:
-            session = {'seq': 1}
-            self.sessions[key] = session
-        seq = session['seq']
-        total = len(payload) + 20 + 20
-
-        tcp_args = [src_port, dst_port, seq, 0, 0x50, 0x18, 0x0200, 0, 0]
-        tcp = pack('>HHIIBBHHH', *tcp_args)
-        ipv4_args = [0x45, 0, total, 0, 0, 0x40, 6, 0]
-        ipv4_args.extend(map(int, src_ip.split('.')))
-        ipv4_args.extend(map(int, dst_ip.split('.')))
-        ipv4 = pack('>BBHHHBBHBBBBBBBB', *ipv4_args)
-        link = b'\x00' * 12 + b'\x08\x00'
-
-        usec, sec = modf(time())
-        usec = int(usec * 1000000)
-        sec = int(sec)
-        size = len(link) + len(ipv4) + len(tcp) + len(payload)
-        head = pack('<IIII', sec, usec, size, size)
-
-        self.write(head)
-        self.write(link)
-        self.write(ipv4)
-        self.write(tcp)
-        self.write(payload)
-        session['seq'] = seq + len(payload)
-
-    def packets(self, src_host, src_port, dst_host, dst_port, payload):
-        limit = 40960
-        for i in range(0, len(payload), limit):
-            self.packet(
-                src_host, src_port,
-                dst_host, dst_port,
-                payload[i:i + limit]
-            )
-
-class File(Exporter):
-    def __init__(self, path):
-        super().__init__()
-        self.path = path
-        self._open_file()
-
-    def _open_file(self):
-        if os.path.exists(self.path):
-            self.file = open(self.path, 'ab')
+    def open(self, file):
+        self.file = file
+        if self.dump_mode == 'pcapng':
+            self.pcap_writer = PcapNgWriter(self.file)
         else:
-            self.file = open(self.path, 'wb')
-        self.file_inode = os.fstat(self.file.fileno()).st_ino  
-        if self.file.tell() == 0:
-            self.header() 
+            self.pcap_writer = PcapWriter(self.file, append=True)
 
-    def write(self, data):
-        try:
-            # Check if file was deleted (inode mismatch)
-            if not os.path.exists(self.path) or os.stat(self.path).st_ino != self.file_inode:
-                print(f"[⚠️] PCAP file {self.path} was deleted. Recreating it.")
-                self.file.close()
-                self._open_file()
-
-            self.file.write(data)
-        except OSError as e:
-            if e.errno == errno.ENOENT:
-                print(f"[❗] PCAP file disappeared, reopening: {self.path}")
-                self._open_file()
-                self.file.write(data)
-            else:
-                raise
-
-    def flush(self):
-        self.file.flush()
+    def write(self, pkt):
+        self.lock.acquire()
+        self.pcap_writer.write(pkt)
+        self.lock.release()
 
     def close(self):
-        self.file.close()
+        self.pcap_writer.close()
 
-class Pipe(Exporter):
-    def __init__(self, cmd):
-        super().__init__()
-        self.proc = Popen(shlex.split(cmd), stdin=PIPE)
-        self.header()
+    def run(self):
+        while True:
+            file = datetime.datetime.now().strftime(self.file_format)
+            tmp_file = os.path.join(os.path.dirname(file), "temp.pcap")
+            self.open(tmp_file)
+            self.lock.release()
+            time.sleep(5)
+            self.lock.acquire()
+            self.close()
+            shutil.move(tmp_file, file)
+            self.logger.info(f"[PCAP Dumped] {file}")
 
-    def write(self, data):
-        self.proc.stdin.write(data)
+# # --- TCP Packet Synthesizer ---
+class TCPDump:
+    default_ack = 1_000_000
+    default_seq = 1_000
 
-    def flush(self):
-        self.proc.stdin.flush()
+    def __init__(self, dumper, src, dst, sport, dport):
+        self.dumper = dumper
+        self.src = src
+        self.dst = dst
+        self.sport = sport
+        self.dport = dport
+        self.seq = self.default_seq
+        self.ack = 0
+        self.client = False
+        self.do_handshake()
+
+    def write_packet(self, seq, ack, client=True, data=None, mode='A'):
+        s, d, sp, dp = (self.src, self.dst, self.sport, self.dport) if client else (self.dst, self.src, self.dport, self.sport)
+        pkt = Ether(src="11:11:11:11:11:11", dst="22:22:22:22:22:22") / IP(src=s, dst=d) / TCP(sport=sp, dport=dp, flags=mode, seq=seq, ack=ack)
+        if data:
+            pkt /= Raw(load=data)
+        self.dumper.write(pkt)
+
+    def do_handshake(self):
+        self.write_packet(self.seq, self.ack, mode='S')
+        self.seq, self.ack = self.default_ack, self.seq + 1
+        self.write_packet(self.seq, self.ack, client=False, mode='SA')
+        self.seq, self.ack = self.ack, self.seq + 1
+        self.write_packet(self.seq, self.ack)
 
     def close(self):
-        self.proc.terminate()
-        self.proc.poll()
+        # FIN from client to server
+        self.write_packet(self.seq, self.ack, client=True, mode='FA')
+        self.seq += 1
 
-class Addon:
+        # ACK from server
+        self.write_packet(self.ack, self.seq, client=False, mode='A')
+
+        # FIN from server to client
+        self.write_packet(self.ack, self.seq, client=False, mode='FA')
+        self.ack += 1
+
+        # ACK from client
+        self.write_packet(self.seq, self.ack, client=True, mode='A')
+
+
+    def add_packet(self, data, client=True):
+        self.write_packet(self.seq, self.ack, client=client, data=data, mode='PA')
+        self.seq, self.ack = self.ack, self.seq + len(data)
+        self.client = client
+
+# --- Mitmproxy Addon (Unified for TCP and HTTP) ---
+class UnifiedDumpAddon:
     def __init__(self):
-        self.exporter = None
-        self.flow_count = 0
-        self.max_flows = ROTATE_FLOW_COUNT
-        self.output_dir = DEFAULT_PCAP_FOLDER
-        self._open_new_file_called = False
+        self.logger = None
+        self.dumper = None
+        self.connections = {}
 
     def load(self, loader):
         loader.add_option(
-            name="pcap_output",
+            name="pcap_path",
             typespec=str,
-            default=DEFAULT_PCAP_FOLDER,
-            help="Folder to save PCAP files"
+            default="/tmp/pcaps",
+            help="Directory to store PCAP files",
         )
 
     def configure(self, updated):
-        self.output_dir = ctx.options.pcap_output
-        os.makedirs(self.output_dir, exist_ok=True)
-        if not self._open_new_file_called:
-            self._open_new_file()
-            self._open_new_file_called = True
+        path = ctx.options.pcap_path
+        os.makedirs(path, exist_ok=True)
 
-    def _open_new_file(self):
-        timestamp = int(time())
-        filename = os.path.join(self.output_dir, f"pcap_{timestamp}.pcap")
-        self.exporter = File(filename)
-        self.flow_count = 0
-        print(f"[💾] Opened new PCAP: {filename}")
+        if not self.logger:
+            self.logger = logging.getLogger("pcapdump")
+            self.logger.setLevel(logging.INFO)
+            log_file = os.path.join(path, "pcap_addon.log")
+            handler = logging.FileHandler(log_file)
+            handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+            self.logger.addHandler(handler)
 
-    def _rotate_file(self):
-        if self.exporter:
-            self.exporter.close()
-        self._open_new_file()
+        if not self.dumper:
+            pcap_file_format = os.path.join(path, "dump_%Y%m%d_%H%M%S.pcap")
+            self.dumper = Dumper(pcap_file_format, self.logger)
+            self.dumper.start()
 
-    def done(self):
-        if self.exporter:
-            self.exporter.close()
+    def request(self, flow: http.HTTPFlow):
+        key = (flow.client_conn.id, flow.server_conn.id)
+        tcpdump = TCPDump(
+            self.dumper,
+            flow.client_conn.address[0],
+            flow.server_conn.address[0],
+            flow.client_conn.address[1],
+            flow.server_conn.address[1],
+        )
 
-    def response(self, flow):
-        client_addr = list(flow.client_conn.address)
-        server_addr = list(flow.server_conn.address)
-        client_ip = client_addr[0].replace('::ffff:', '')
-        server_ip = server_addr[0].replace('::ffff:', '')
+        http_request_line = f"{flow.request.method} {flow.request.path} {flow.request.http_version}\r\n".encode()
+        http_headers = b"".join(f"{k}: {v}\r\n".encode() for k, v in flow.request.headers.items())
+        http_body = flow.request.raw_content or b""
+        http_payload = http_request_line + http_headers + b"\r\n" + http_body
+        tcpdump.add_packet(http_payload, client=True)
+        self.connections[key] = tcpdump
 
-        if '.' not in client_ip or '.' not in server_ip:
-            return  # skip non-IPv4
+    def response(self, flow: http.HTTPFlow):
+        key = (flow.client_conn.id, flow.server_conn.id)
+        tcpdump = self.connections.pop(key, None)
+        if tcpdump:
+            http_response_line = f"{flow.response.http_version} {flow.response.status_code} {flow.response.reason}\r\n".encode()
+            http_headers = b"".join(f"{k}: {v}\r\n".encode() for k, v in flow.response.headers.items())
+            http_body = flow.response.raw_content or b""
+            http_payload = http_response_line + http_headers + b"\r\n" + http_body
+            tcpdump.add_packet(http_payload, client=False)
+            tcpdump.close()
 
-        client_addr[0] = client_ip
-        server_addr[0] = server_ip
+    def tcp_start(self, flow: tcp.TCPFlow):
+        key = (flow.client_conn.id, flow.server_conn.id)
+        self.logger.info(f"[TCP START] {key}")
+        self.connections[key] = TCPDump(
+            self.dumper,
+            flow.client_conn.address[0],
+            flow.server_conn.address[0],
+            flow.client_conn.address[1],
+            flow.server_conn.address[1],
+        )
 
-        self.export_request(client_addr, server_addr, flow.request)
-        self.export_response(client_addr, server_addr, flow.response)
-        self.exporter.flush()
 
-        self.flow_count += 1
-        if self.flow_count >= self.max_flows:
-            self._rotate_file()
+    def tcp_message(self, flow: tcp.TCPFlow):
+        key = (flow.client_conn.id, flow.server_conn.id)
+        tcpdump = self.connections.get(key)
+        if tcpdump:
+            tcpdump.add_packet(flow.message.content, client=flow.message.from_client)
 
-    def export_request(self, client_addr, server_addr, r):
-        proto = f"{r.method} {r.path} {r.http_version}\r\n"
-        payload = bytearray()
-        payload.extend(proto.encode('ascii'))
-        payload.extend(bytes(r.headers))
-        payload.extend(b'\r\n')
-        payload.extend(r.raw_content)
-        self.exporter.packets(*client_addr, *server_addr, payload)
+    def tcp_end(self, flow: tcp.TCPFlow):
+        key = (flow.client_conn.id, flow.server_conn.id)
+        tcpdump = self.connections.pop(key, None)
+        if tcpdump:
+            tcpdump.close()
+            self.logger.info(f"[TCP END] {key}")
 
-    def export_response(self, client_addr, server_addr, r):
-        headers = r.headers.copy()
-        if r.http_version.startswith('HTTP/2'):
-            headers.setdefault('content-length', str(len(r.raw_content)))
-            proto = f"{r.http_version} {r.status_code}\r\n"
-        else:
-            headers.setdefault('Content-Length', str(len(r.raw_content)))
-            proto = f"{r.http_version} {r.status_code} {r.reason}\r\n"
-
-        payload = bytearray()
-        payload.extend(proto.encode('ascii'))
-        payload.extend(bytes(headers))
-        payload.extend(b'\r\n')
-        payload.extend(r.raw_content)
-        self.exporter.packets(*server_addr, *client_addr, payload)
-
-addons = [Addon()]
+addons = [UnifiedDumpAddon()]

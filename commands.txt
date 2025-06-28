@@ -1,9 +1,9 @@
 ### MITM LAUNCH
 
-mitmdump \
+SSLKEYLOGFILE=mitmkeys.log mitmdump \
   --mode reverse:https://127.0.0.1:5001 \
   --listen-port 5000 \
-  --certs "*=combined.pem" --quiet --ssl-insecure -s angel_pit_proxy.py -s angel_dumper.py --set pcap_output='./pcaps'
+  --certs "*=combined.pem" --quiet --ssl-insecure -s angel_pit_proxy.py 
   
 ### GENERATE CERTIFICATES
 

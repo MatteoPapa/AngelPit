@@ -6,8 +6,8 @@ from collections import Counter
 import sys 
 
 PORT = sys.argv[1] if len(sys.argv) > 1 else 5000
-TARGET_URL = f"https://127.0.0.1:{PORT}"
-TOTAL_REQUESTS = 5000
+TARGET_URL = f"http://127.0.0.1:{PORT}"
+TOTAL_REQUESTS = 2400
 DURATION_SECONDS = 60
 REQUESTS_PER_SECOND = TOTAL_REQUESTS // DURATION_SECONDS
 CACERT_PATH = "../ca-cert.pem"
@@ -52,8 +52,8 @@ async def send_requests_batch(session, interval, second_index):
 
 async def main():
     ssl_context = ssl.create_default_context(cafile=CACERT_PATH)
-    connector = aiohttp.TCPConnector(ssl=ssl_context)
-    # connector = aiohttp.TCPConnector()
+    #connector = aiohttp.TCPConnector(ssl=ssl_context)
+    connector = aiohttp.TCPConnector()
 
     total_success = 0
     total_errors = 0
