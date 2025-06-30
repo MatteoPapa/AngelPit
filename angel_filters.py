@@ -17,7 +17,7 @@ ALL_SESSIONS = TTLCache(maxsize=SESSION_LIMIT, ttl=SESSION_TTL)
 # How to block the attack
 FLAG_REGEX = re.compile(rb'[A-Z0-9]{31}=')
 FLAG_REPLACEMENT = "GRAZIEDARIO"
-BLOCK_ALL_EVIL = True
+BLOCK_ALL_EVIL = False
 BLOCKING_ERROR = """<!doctype html>
 <html lang=en>
 <title>500 Internal Server Error</title>
