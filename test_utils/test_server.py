@@ -42,5 +42,5 @@ context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain(certfile=CERT_FILE, keyfile=KEY_FILE)
 httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-print(f"🚀 Serving threaded HTTPS on https://localhost:{PORT}")
+print(f"🚀 Serving threaded HTTPS on https://0.0.0.0:{PORT}")
 httpd.serve_forever()

@@ -1,9 +1,8 @@
 ### MITM LAUNCH
 
-SSLKEYLOGFILE=mitmkeys.log mitmdump \
-  --mode reverse:https://127.0.0.1:5001 \
+mitmdump --mode reverse:https://127.0.0.1:8443 \
   --listen-port 5000 \
-  --certs "*=combined.pem" --quiet --ssl-insecure -s angel_pit_proxy.py 
+  --certs "*=combined.pem" --quiet --ssl-insecure -s angel_pit_proxy.py -s angel_dumper.py --set pcap_path=/mnt/c/Users/super/OneDrive/Desktop/pcaps --set service_name=angel_test
   
 ### GENERATE CERTIFICATES
 

@@ -2,11 +2,11 @@ import requests
 import sys
 
 # Path to your trusted CA certificate
-CA_CERT = "../ca-cert.pem"
+# CA_CERT = "../ca-cert.pem"
 
 # Create a persistent session
 session = requests.Session()
-session.verify = CA_CERT  # Trust only this CA
+session.verify = False  # Trust only this CA
 session.headers.update({"Content-Type": "application/json", "User-Agent": "checkz"})
 
 url = "https://127.0.0.1:5000"

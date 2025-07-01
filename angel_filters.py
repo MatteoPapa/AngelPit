@@ -8,8 +8,8 @@ import logging
 logger = logging.getLogger("mitm_logger")
 
 # HTTP session tracking
-TRACK_HTTP_SESSION = False
-SESSION_COOKIE_NAME = "session"
+TRACK_HTTP_SESSION = True
+SESSION_COOKIE_NAME = "user_hash"
 SESSION_TTL = 30 #seconds
 SESSION_LIMIT = 4000
 ALL_SESSIONS = TTLCache(maxsize=SESSION_LIMIT, ttl=SESSION_TTL)
@@ -28,7 +28,7 @@ INFINITE_LOAD_RESPONSE = mitmproxy.http.Response.make(302, '', {"Location": "htt
 
 # Regexes
 ALL_REGEXES = [
-    re.compile(rb'evil')
+    rb'Windows'
 ]
 ALL_REGEXES = list(re.compile(pattern) for pattern in ALL_REGEXES)
 
@@ -123,7 +123,7 @@ def multiple_flags_filter(ctx):
 def regex_filter(ctx):
     if any(re.search(pattern, ctx.raw_request) for pattern in ALL_REGEXES):
         if ctx.session_id:
-            logger.debug(f"[🔍] Regex match found in session {ctx.session_id}")
+            logger.info(f"[🔍] Regex match found in session {ctx.session_id}")
             ALL_SESSIONS[ctx.session_id] = True
         replace_flag(ctx.flow)
 
