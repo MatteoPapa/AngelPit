@@ -9,7 +9,7 @@ logger = logging.getLogger("mitm_logger")
 
 # HTTP session tracking
 TRACK_HTTP_SESSION = True
-SESSION_COOKIE_NAME = "user_hash"
+SESSION_COOKIE_NAME = "session"
 SESSION_TTL = 30 #seconds
 SESSION_LIMIT = 4000
 ALL_SESSIONS = TTLCache(maxsize=SESSION_LIMIT, ttl=SESSION_TTL)
@@ -28,7 +28,7 @@ INFINITE_LOAD_RESPONSE = mitmproxy.http.Response.make(302, '', {"Location": "htt
 
 # Regexes
 ALL_REGEXES = [
-    rb'Windows'
+    rb'evilbanana'
 ]
 ALL_REGEXES = list(re.compile(pattern) for pattern in ALL_REGEXES)
 
