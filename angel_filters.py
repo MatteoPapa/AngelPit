@@ -64,6 +64,12 @@ def params_filter(ctx):
             logger.debug(f"Parameter too long: {len(value)}")
             replace_flag(ctx.flow)
             return
+            
+def nonprintable_params_filter(ctx):
+    if ctx.flow.type != "http":
+        return
+
+    params = ctx.flow.request.query
 
     for value in params.values():
         for c in value:
@@ -102,6 +108,17 @@ def useragent_blacklist_filter(ctx):
         logger.debug(f"Blacklisted User-Agent: {user_agent}")
         replace_flag(ctx.flow)
 
+ACCEPT_ENCODING_WHITELIST = [
+    "gzip, deflate, zstd",
+]
+def accept_encoding_filter(ctx):
+    if ctx.flow.type != "http":
+        return
+
+    accept_encoding = ctx.flow.request.headers.get("Accept-Encoding", "")
+    if accept_encoding not in ACCEPT_ENCODING_WHITELIST:
+        logger.debug(f"Invalid Accept-Encoding header")
+        replace_flag(ctx.flow)
 
 def multiple_flags_filter(ctx):
     counter = 0
@@ -137,8 +154,10 @@ FILTERS = [
     regex_filter,
     # method_filter,
     # params_filter,
+    # nonprintable_params_filter,
     # useragent_whitelist_filter,
     # useragent_blacklist_filter,
+    # accept_encoding_filter,
     # multiple_flags_filter,
 ]
 
