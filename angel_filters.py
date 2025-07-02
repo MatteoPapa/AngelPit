@@ -24,7 +24,7 @@ BLOCKING_ERROR = """<!doctype html>
 <h1>Internal Server Error</h1>
 <p>The server encountered an internal error and was unable to complete your request. Either the server is overloaded or there is an error in the application.</p>"""
 ERROR_RESPONSE = mitmproxy.http.Response.make(500, BLOCKING_ERROR, {"Content-Type": "text/html"})
-INFINITE_LOAD_RESPONSE = mitmproxy.http.Response.make(302, '', {"Location": "https://stream.wikimedia.org/v2/stream/recentchange"})
+INFINITE_LOADING_RESPONSE = mitmproxy.http.Response.make(302, '', {"Location": "https://stream.wikimedia.org/v2/stream/recentchange"})
 
 # Regexes
 ALL_REGEXES = [
@@ -164,18 +164,24 @@ FILTERS = [
 
 ########### UTILITY FUNCTIONS ###########
 
-def replace_flag(flow):
+def block_flow(flow):
     if flow.type == "http":
-        if BLOCK_ALL_EVIL:
-            flow.response = INFINITE_LOAD_RESPONSE
-            # flow.response = ERROR_RESPONSE
-            # flow.kill()
+        flow.response = INFINITE_LOADING_RESPONSE
+        # flow.response = ERROR_RESPONSE
+        # flow.kill()
+        return True
+    elif flow.type == "tcp":
+        if flow.killable:
+            flow.kill()
+            return True
+
+def replace_flag(flow):
+    if BLOCK_ALL_EVIL:
+        if block_flow(flow):
             return
+    if flow.type == "http":
         flow.response.set_content(re.sub(FLAG_REGEX, FLAG_REPLACEMENT.encode(), flow.response.content or b""))
     elif flow.type == "tcp":
-        if BLOCK_ALL_EVIL and flow.killable:
-            flow.kill()
-            return
         for msg in reversed(flow.messages):
             if not msg.from_client:
                 msg.content = re.sub(FLAG_REGEX, FLAG_REPLACEMENT.encode(), msg.content)
