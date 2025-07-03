@@ -37,10 +37,11 @@ class ColorFormatter(logging.Formatter):
         return f"{color}{message}{self.RESET}"
 
 logger = logging.getLogger("mitm_logger")
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-handler.setFormatter(ColorFormatter("[%(levelname)s] %(message)s"))
-logger.addHandler(handler)
+logger.setLevel(logging.INFO) # Change to logging.DEBUG to display debug messages
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(ColorFormatter("[%(levelname)s] %(message)s"))
+    logger.addHandler(handler)
 
 ########## FILTER HOT-RELOAD ##########
 
