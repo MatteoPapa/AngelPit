@@ -6,12 +6,14 @@ from mitmproxy import ctx, http
 import logging
 import threading
 import sys 
+import gc
 
 # ==== Configuration ====
 MTU = 1400
 SEQ_START_CLIENT = 1000
 SEQ_START_SERVER = 100000
-DUMP_INTERVAL_SECONDS = 5
+DUMP_INTERVAL_SECONDS = 20
+CLIENT_TIMEOUT_SECONDS = 60  # TTL for client cleanup
 
 # ==== Logging Setup ====
 logging.basicConfig(
@@ -50,9 +52,9 @@ class PCAPDumper:
 
         os.makedirs(self.temp_dir, exist_ok=True)
 
-        print(f"📂 PCAP path set to: {self.pcap_path}")
-        print(f"🔧 Service name set to: {self.service_name}")
-        print(f"📦 PCAP Dumper initialized for service: {self.service_name}")
+        print(f"\U0001F4C2 PCAP path set to: {self.pcap_path}")
+        print(f"\U0001F527 Service name set to: {self.service_name}")
+        print(f"\U0001F4E6 PCAP Dumper initialized for service: {self.service_name}")
 
         if not self._is_running:
             self._is_running = True
@@ -68,12 +70,26 @@ class PCAPDumper:
             try:
                 print(f"⏳ Periodic PCAP dump at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
                 self._flush_active_streams()     
-                self._concatenate_pcaps()    
+                self._cleanup_expired_clients()
+                self._concatenate_pcaps()
+                gc.collect() 
             except Exception as e:
                 print(f"❌ Error during periodic PCAP dump: {e}")
 
+    def _cleanup_expired_clients(self):
+        now = time.time()
+        expired_ids = []
+        for client_id, stream in self.client_streams.items():
+            if now - stream["start_time"] > CLIENT_TIMEOUT_SECONDS:
+                expired_ids.append(client_id)
+        for client_id in expired_ids:
+            logger.info(f"🧹 Cleaning up expired client: {client_id}")
+            stream = self.client_streams.pop(client_id, None)
+            if stream and stream['flows']:
+                packets = self._build_tcp_stream(stream['client_addr'], stream['server_addr'], stream['flows'])
+                self._save_temp_pcap(packets, stream['client_addr'])
+
     def client_connected(self, client):
-        # print(f"🔗 Client connected: {client.id} ({client.address})")
         self.client_streams[client.id] = {
             "client_addr": client.address,
             "flows": [],
@@ -89,7 +105,6 @@ class PCAPDumper:
                 stream["server_addr"] = flow.server_conn.address
 
     def client_disconnected(self, client):
-        # print(f"🔌 Client disconnected: {client.id} ({client.address})")
         stream = self.client_streams.pop(client.id, None)
         if not stream or not stream["flows"]:
             return
@@ -100,9 +115,11 @@ class PCAPDumper:
 
         packets = self._build_tcp_stream(client_addr, server_addr, flows)
         self._save_temp_pcap(packets, client_addr)
+        del flows
+        del packets
+
 
     def _save_temp_pcap(self, packets, client_addr):
-        # print(f"📥 Saving temporary PCAP for {client_addr[0]}:{client_addr[1]}")
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{client_addr[0]}_{client_addr[1]}_{ts}.pcap"
         full_path = os.path.join(self.temp_dir, filename)
@@ -117,7 +134,7 @@ class PCAPDumper:
             if not stream["flows"] or stream["server_addr"] is None:
                 continue
 
-            flows_to_dump = list(stream["flows"])  # clone current flows
+            flows_to_dump = list(stream["flows"])  # clone
             packets = self._build_tcp_stream(
                 stream["client_addr"],
                 stream["server_addr"],
@@ -125,17 +142,20 @@ class PCAPDumper:
             )
             self._save_temp_pcap(packets, stream["client_addr"])
 
-            stream["flows"].clear()  # ✅ clear flows so they don’t get re-dumped
+            # ✅ Free memory explicitly
+            stream["flows"].clear()
+            del flows_to_dump
+            del packets
 
     def _concatenate_pcaps(self):
         files = [os.path.join(self.temp_dir, f) for f in os.listdir(self.temp_dir) if f.endswith(".pcap")]
         if not files:
             return
 
-        all_packets = PacketList()
+        all_packets = []
         for f in sorted(files):
             try:
-                all_packets += rdpcap(f)
+                all_packets.extend(rdpcap(f))
             except Exception as e:
                 logger.warning(f"⚠️ Could not read {f}: {e}")
 

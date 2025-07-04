@@ -7,9 +7,9 @@ import sys
 # Create a persistent session
 session = requests.Session()
 session.verify = False  # Trust only this CA
-session.headers.update({"Content-Type": "application/json", "User-Agent": "checkz"})
+session.headers.update({"Content-Type": "application/json", "User-Agent": "check"})
 
-url = "https://127.0.0.1:5000"
+url = "http://37.27.33.26:8000/"
 
 data = sys.argv[1] if len(sys.argv) > 1 else "banana"
 print(f"🔹 Sending POST request with data: {data}")

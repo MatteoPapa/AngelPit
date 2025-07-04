@@ -3,17 +3,22 @@ import aiohttp
 import ssl
 import time
 from collections import Counter
-import sys 
+import sys
 
-PORT = sys.argv[1] if len(sys.argv) > 1 else 5000
-TARGET_URL = f"http://127.0.0.1:{PORT}"
-TOTAL_REQUESTS = 2400
-DURATION_SECONDS = 60
-REQUESTS_PER_SECOND = TOTAL_REQUESTS // DURATION_SECONDS
+# ==== Configuration ====
+REQUESTS_PER_SECOND = 40  # 🔁 Fixed frequency
+DURATION_MINUTES = 20
+PORT = sys.argv[1] if len(sys.argv) > 1 else 5000  # Optional port as second arg
+
+# ==== Derived Config ====
+DURATION_SECONDS = DURATION_MINUTES * 60
+TOTAL_REQUESTS = REQUESTS_PER_SECOND * DURATION_SECONDS
+TARGET_URL = f"https://localhost:{PORT}"  # Localhost for testing
+# TARGET_URL = f"http://37.27.33.26:{PORT}"
 CACERT_PATH = "../ca-cert.pem"
 TIMEOUT_SECONDS = 15
 
-# Track results globally
+# ==== Globals ====
 results_queue = asyncio.Queue()
 
 async def fetch(session, url):
@@ -49,11 +54,13 @@ async def send_requests_batch(session, interval, second_index):
 
     return local_success, sum(local_errors.values())
 
-
 async def main():
-    ssl_context = ssl.create_default_context(cafile=CACERT_PATH)
-    #connector = aiohttp.TCPConnector(ssl=ssl_context)
-    connector = aiohttp.TCPConnector()
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    connector = aiohttp.TCPConnector(ssl=ssl_context)
+
+    # connector = aiohttp.TCPConnector()
 
     total_success = 0
     total_errors = 0
@@ -65,21 +72,19 @@ async def main():
             interval = 1 / REQUESTS_PER_SECOND
             task = asyncio.create_task(send_requests_batch(session, interval, second))
             running_batches.append(task)
-            await asyncio.sleep(1)  # Don't wait for batch to finish — move on immediately
+            await asyncio.sleep(1)
 
-        # Wait for all batches to finish
         results = await asyncio.gather(*running_batches)
 
-        # Aggregate final results
         for successes, errors in results:
             total_success += successes
             total_errors += errors
 
     print(f"\n📊 Benchmark Complete:")
+    print(f"    Duration:     {DURATION_MINUTES} minute(s)")
     print(f"    Total Sent:   {TOTAL_REQUESTS}")
     print(f"    Total Success:✅ {total_success}")
     print(f"    Total Errors: ❌ {total_errors}")
-
 
 if __name__ == "__main__":
     asyncio.run(main())
