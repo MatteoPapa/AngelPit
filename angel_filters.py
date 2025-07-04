@@ -8,7 +8,7 @@ import mitmproxy
 logger = logging.getLogger("mitm_logger")
 
 # HTTP session tracking
-TRACK_HTTP_SESSION = True
+TRACK_HTTP_SESSION = False
 SESSION_COOKIE_NAME = "session"
 SESSION_TTL = 30  # seconds
 SESSION_LIMIT = 4000
@@ -16,7 +16,7 @@ ALL_SESSIONS = TTLCache(maxsize=SESSION_LIMIT, ttl=SESSION_TTL)
 
 FLAG_REGEX = re.compile(rb"[A-Z0-9]{31}=")
 FLAG_REPLACEMENT = "GRAZIEDARIO"
-BLOCK_ALL_EVIL = False
+BLOCK_ALL_EVIL = True
 BLOCKING_ERROR = """<!doctype html>
 <html lang=en>
 <title>500 Internal Server Error</title>
@@ -38,7 +38,7 @@ ALLOWED_HTTP_METHODS = ["GET", "POST", "PATCH", "PUT", "DELETE"]
 MAX_PARAMETER_AMOUNT = 20
 MAX_PARAMETER_LENGTH = 200
 USERAGENTS_WHITELIST = [
-    r"CHECKER",
+    r"checker",
 ]
 USERAGENTS_WHITELIST = [re.compile(pattern) for pattern in USERAGENTS_WHITELIST]
 USERAGENTS_BLACKLIST = [

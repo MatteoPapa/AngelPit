@@ -9,7 +9,7 @@ session = requests.Session()
 session.verify = False  # Trust only this CA
 session.headers.update({"Content-Type": "application/json", "User-Agent": "check"})
 
-url = "http://37.27.33.26:8000/"
+url = "http://localhost:5000/"
 
 data = sys.argv[1] if len(sys.argv) > 1 else "banana"
 print(f"🔹 Sending POST request with data: {data}")
